@@ -155,13 +155,14 @@ namespace g2o {
     }
 
     //Stop criterium (Raul)
-    if((iniChi-currentChi)*1e3<iniChi)
+    if((iniChi-currentChi)*1e4<iniChi)
         _nBad++;
     else
         _nBad=0;
 
     if(_nBad>=3)
     {
+        // cout << "_nBad>=3"<<endl;
         return Terminate;
     }
 

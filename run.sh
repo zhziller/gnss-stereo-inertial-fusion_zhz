@@ -1,13 +1,17 @@
 #!/bin/bash
 # TODO doc
 
+# 开启错误处理
 set -eE # Any subsequent commands which fail will cause the shell script to exit immediately
 
 # Get full directory name of the script no matter where it is being called from
+# 获取当前脚本所在完整目录路径
 CURRENT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
-OUTPUT_DIR=$CURRENT_DIR/output/$(date '+%Y%m%d_%H%M%S')
+# 根据当前日期时间生成输出文件名
+OUTPUT_DIR=/home/zou/traj/GNSS_orbslam/$(date '+%Y%m%d_%H%M%S')
 
+# 帮助函数解释如何使用脚本
 function echoUsage()
 {
     echo -e "Usage: $0 [FLAG] ROSBAG\n\
@@ -17,6 +21,7 @@ function echoUsage()
             \t -h help" >&2
 }
 
+# 默认参数文件和launch文件
 SETTINGS_FILE=$CURRENT_DIR/Examples/Stereo-Inertial/rosario_dataset/Rosario_3_0.yaml
 LAUNCH_FILE=$CURRENT_DIR/Examples/ROS/GNSS_SI/launch/rosario.launch
 while getopts "l:s:ho:" opt; do
@@ -46,6 +51,7 @@ while getopts "l:s:ho:" opt; do
     esac
 done
 
+# 从命令行中提取bag文件路径
 shift $((OPTIND -1))
 BAG=$1
 
@@ -66,8 +72,12 @@ LOG_OUTPUT_DIR=$(roslaunch-logs)
 wait $P1
 
 # Save trajectory file
-TRAJECTORY_FILE=$HOME/.ros/CameraTrajectoryGPSOpt.txt
-mv $TRAJECTORY_FILE $OUTPUT_DIR
+TRAJECTORY_FILE=/home/zou/traj/GNSS_orbslam/FrameTrajectory_TUM_Format.txt
+cp $TRAJECTORY_FILE $OUTPUT_DIR
+TRAJECTORY_FILE=/home/zou/traj/GNSS_orbslam/KeyFrameTrajectory_TUM_Format.txt
+cp $TRAJECTORY_FILE $OUTPUT_DIR
+TRAJECTORY_FILE=/home/zou/traj/GNSS_orbslam/ground_truth.txt
+cp $TRAJECTORY_FILE $OUTPUT_DIR
 
 # Save log file
 cp $LOG_OUTPUT_DIR/orbslam3*.log $OUTPUT_DIR

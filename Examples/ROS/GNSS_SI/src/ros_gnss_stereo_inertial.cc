@@ -89,12 +89,16 @@ public:
 class ImageGrabber
 {
 public:
-    ImageGrabber(ORB_SLAM3::System* pSLAM, ImuGrabber *pImuGb, GpsGrabber *pGpsGb, const bool bRect, const bool bClahe): mpSLAM(pSLAM), mpImuGb(pImuGb), mpGpsGb(pGpsGb), do_rectify(bRect), mbClahe(bClahe){}
+    ImageGrabber(ORB_SLAM3::System* pSLAM, ImuGrabber *pImuGb, GpsGrabber *pGpsGb, const bool bRect, const bool bClahe): mpSLAM(pSLAM), 
+    mpImuGb(pImuGb), mpGpsGb(pGpsGb), do_rectify(bRect), mbClahe(bClahe),stop_sync_flag(false){}
 
     void GrabImageLeft(const sensor_msgs::ImageConstPtr& msg);
     void GrabImageRight(const sensor_msgs::ImageConstPtr& msg);
     cv::Mat GetImage(const sensor_msgs::ImageConstPtr &img_msg);
     void SyncWithImu();
+    void stop_sync(){
+      stop_sync_flag = true;
+    }
 
     queue<sensor_msgs::ImageConstPtr> imgLeftBuf, imgRightBuf;
     std::mutex mBufMutexLeft,mBufMutexRight;
@@ -108,6 +112,8 @@ public:
 
     const bool mbClahe;
     cv::Ptr<cv::CLAHE> mClahe = cv::createCLAHE(3.0, cv::Size(8, 8));
+private:
+    bool stop_sync_flag;
 };
 
 bool useGps(const string &strSettingsFile)
@@ -204,23 +210,35 @@ int main(int argc, char **argv)
     }
 
   // Maximum delay, 5 seconds
-  ros::Subscriber sub_imu = n.subscribe("/imu", 1000, &ImuGrabber::GrabImu, &imugb); 
+  ros::Subscriber sub_imu = n.subscribe("/camera/imu", 1000, &ImuGrabber::GrabImu, &imugb); 
   ros::Subscriber sub_img_left = n.subscribe("/camera/left/image_raw", 100, &ImageGrabber::GrabImageLeft,&igb);
   ros::Subscriber sub_img_right = n.subscribe("/camera/right/image_raw", 100, &ImageGrabber::GrabImageRight,&igb);
-  ros::Subscriber sub_gps = n.subscribe("/gps/fix", 1000, &GpsGrabber::GrabGps, &gpsgb); 
+  ros::Subscriber sub_gps = n.subscribe("/bynav/fix", 1000, &GpsGrabber::GrabGps, &gpsgb); 
   ros::Subscriber sub_vicon = n.subscribe("/vicon/firefly_sbx/firefly_sbx", 1000, &GpsGrabber::GrabVicon, &gpsgb); 
   
 
   std::thread sync_thread(&ImageGrabber::SyncWithImu,&igb);
 
   ros::spin();
-  if(!ros::ok())
-  {
-    std::cout << "Shutting down..." << std::endl;
-    SLAM.forceSystemShutdown(false);
-    gpsgb.ClearMeasurements();
-  }
+  // Stop all threads
+  SLAM.Shutdown();
+  //  停止同步线程
+  igb.stop_sync();
+  sync_thread.join();
+  SLAM.SaveKeyFrameTrajectoryTUM("/home/zou/traj/GNSS_orbslam/KeyFrameTrajectory_TUM_Format.txt");
+  SLAM.SaveTrajectoryTUM("/home/zou/traj/GNSS_orbslam/FrameTrajectory_TUM_Format.txt");
+  // SLAM.forceSystemShutdown(false);
+  gpsgb.ClearMeasurements();
+  // if(!ros::ok())
+  // {
+  //   std::cout << "Shutting down..." << std::endl;
+  //   SLAM.SaveKeyFrameTrajectoryTUM("/home/zou/traj/GNSS_orbslam/KeyFrameTrajectory_TUM_Format.txt");
+  //   SLAM.SaveTrajectoryTUM("/home/zou/traj/GNSS_orbslam/FrameTrajectory_TUM_Format.txt");
+  //   // SLAM.forceSystemShutdown(false);
+  //   gpsgb.ClearMeasurements();
+  // }
 
+  ros::shutdown();
   return 0;
 }
 
@@ -274,7 +292,7 @@ void ImageGrabber::SyncWithImu()
   std::cout << "Using GPS: " << mpGpsGb->mbUseGps << std::endl;
   const double maxTimeDiff = 0.01;
   //int gpsMeasId = 0;
-  while(1)
+  while(!stop_sync_flag)
   {
     cv::Mat imLeft, imRight;
     double tImLeft = 0, tImRight = 0;
@@ -384,7 +402,7 @@ void GpsGrabber::GrabGps(const sensor_msgs::NavSatFixConstPtr &gps_msg)
 {
   if(!mbUseGps)
     return;
-
+ 
   Eigen::Matrix3d covariance;
   const int POSITION_SIZE = 3;
   if(noiseStdDev == 0.0)

@@ -1,23 +1,18 @@
 /**
-* This file is part of GNSS-SI. GNSS-SI is based on ORB-SLAM3.
-* Copyright (C) 2023 Javier Cremona, Ernesto Kofman and Taihú Pire, CIFASIS (CONICET-UNR).
-* Copyright (C) 2023 Javier Civera, University of Zaragoza.
-* This file was modified by Javier Cremona.
+* This file is part of ORB-SLAM3
 *
-* Original authors:
-*
-* Copyright (C) 2017-2021 Carlos Campos, Richard Elvira, Juan J. Gómez Rodríguez, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+* Copyright (C) 2017-2020 Carlos Campos, Richard Elvira, Juan J. Gómez Rodríguez, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
 * Copyright (C) 2014-2016 Raúl Mur-Artal, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
 *
-* GNSS-SI is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
+* ORB-SLAM3 is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
 * License as published by the Free Software Foundation, either version 3 of the License, or
 * (at your option) any later version.
 *
-* GNSS-SI is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even
+* ORB-SLAM3 is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even
 * the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 * GNU General Public License for more details.
 *
-* You should have received a copy of the GNU General Public License along with GNSS-SI.
+* You should have received a copy of the GNU General Public License along with ORB-SLAM3.
 * If not, see <http://www.gnu.org/licenses/>.
 */
 
@@ -54,12 +49,16 @@ public:
 class ImageGrabber
 {
 public:
-    ImageGrabber(ORB_SLAM3::System* pSLAM, ImuGrabber *pImuGb, const bool bRect, const bool bClahe): mpSLAM(pSLAM), mpImuGb(pImuGb), do_rectify(bRect), mbClahe(bClahe){}
+    ImageGrabber(ORB_SLAM3::System* pSLAM, ImuGrabber *pImuGb, const bool bRect, const bool bClahe): mpSLAM(pSLAM), 
+    mpImuGb(pImuGb), do_rectify(bRect), mbClahe(bClahe),stop_sync_flag(false){}
 
     void GrabImageLeft(const sensor_msgs::ImageConstPtr& msg);
     void GrabImageRight(const sensor_msgs::ImageConstPtr& msg);
     cv::Mat GetImage(const sensor_msgs::ImageConstPtr &img_msg);
     void SyncWithImu();
+    void stop_sync(){
+      stop_sync_flag = true;
+    }
 
     queue<sensor_msgs::ImageConstPtr> imgLeftBuf, imgRightBuf;
     std::mutex mBufMutexLeft,mBufMutexRight;
@@ -72,6 +71,8 @@ public:
 
     const bool mbClahe;
     cv::Ptr<cv::CLAHE> mClahe = cv::createCLAHE(3.0, cv::Size(8, 8));
+private:
+    bool stop_sync_flag;
 };
 
 
@@ -143,14 +144,25 @@ int main(int argc, char **argv)
     }
 
   // Maximum delay, 5 seconds
-  ros::Subscriber sub_imu = n.subscribe("/imu", 1000, &ImuGrabber::GrabImu, &imugb); 
+  ros::Subscriber sub_imu = n.subscribe("/camera/imu", 1000, &ImuGrabber::GrabImu, &imugb); 
   ros::Subscriber sub_img_left = n.subscribe("/camera/left/image_raw", 100, &ImageGrabber::GrabImageLeft,&igb);
   ros::Subscriber sub_img_right = n.subscribe("/camera/right/image_raw", 100, &ImageGrabber::GrabImageRight,&igb);
 
   std::thread sync_thread(&ImageGrabber::SyncWithImu,&igb);
 
   ros::spin();
+  // Stop all threads
+  SLAM.Shutdown();
+  //  停止同步线程
+  igb.stop_sync();
+  sync_thread.join();
 
+  // Save camera trajectory
+  SLAM.SaveKeyFrameTrajectoryTUM("/home/zou/traj/GNSS_orbslam/KeyFrameTrajectory_TUM_Format.txt");
+  SLAM.SaveTrajectoryTUM("/home/zou/traj/GNSS_orbslam/FrameTrajectory_TUM_Format.txt");
+  // SLAM.SaveTrajectoryKITTI("/home/zou/traj/GNSS_orbslam/FrameTrajectory_KITTI_Format.txt");
+
+  ros::shutdown();
   return 0;
 }
 
@@ -201,7 +213,7 @@ cv::Mat ImageGrabber::GetImage(const sensor_msgs::ImageConstPtr &img_msg)
 void ImageGrabber::SyncWithImu()
 {
   const double maxTimeDiff = 0.01;
-  while(1)
+  while(!stop_sync_flag)
   {
     cv::Mat imLeft, imRight;
     double tImLeft = 0, tImRight = 0;
@@ -287,4 +299,5 @@ void ImuGrabber::GrabImu(const sensor_msgs::ImuConstPtr &imu_msg)
   mBufMutex.unlock();
   return;
 }
+
 

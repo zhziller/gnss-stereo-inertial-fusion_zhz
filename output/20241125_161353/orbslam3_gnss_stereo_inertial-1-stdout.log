@@ -1,0 +1,372 @@
+
+GNSS-SI Copyright (C) 2023 Javier Cremona, Ernesto Kofman and Taihú Pire, CIFASIS (CONICET-UNR).
+GNSS-SI Copyright (C) 2023 Javier Civera, University of Zaragoza.
+ORB-SLAM3 Copyright (C) 2017-2020 Carlos Campos, Richard Elvira, Juan J. Gómez, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+ORB-SLAM2 Copyright (C) 2014-2016 Raúl Mur-Artal, José M.M. Montiel and Juan D. Tardós, University of Zaragoza.
+This program comes with ABSOLUTELY NO WARRANTY;
+This is free software, and you are welcome to redistribute it
+under certain conditions. See LICENSE.txt.
+
+Input sensor was set to: Stereo-Inertial
+Use Global Measurements: 1
+
+Loading ORB Vocabulary. This could take a while...
+Vocabulary loaded!
+
+Initialization of Atlas from scratch 
+Creation of new map with id: 0
+Creation of new map with last KF id: 0
+Seq. Name: 
+
+Camera Parameters: 
+- Camera: Pinhole
+- Image scale: 1
+- fx: 347.656
+- fy: 347.656
+- cx: 339.376
+- cy: 198.59
+- k1: 0
+- k2: 0
+- p1: 0
+- p2: 0
+- fps: 15
+- color order: RGB (ignored if grayscale)
+
+Depth Threshold (Close/Far Points): 1.18719e+06
+
+ORB Extractor Parameters: 
+- Number of Features: 1200
+- Scale Levels: 8
+- Scale Factor: 1.2
+- Initial Fast Threshold: 20
+- Minimum Fast Threshold: 7
+
+Left camera to Imu Transform (Tbc): 
+[0.0094714398, -0.99390817, 0.10980361, -0.03095006;
+ 0.99845672, 0.0033909201, -0.055431359, -0.077136427;
+ 0.054721352, 0.11015916, 0.99240643, 0.026512491;
+ 0, 0, 0, 1]
+
+IMU frequency: 142 Hz
+IMU gyro noise: 0.017 rad/s/sqrt(Hz)
+IMU gyro walk: 0.0019393 rad/s^2/sqrt(Hz)
+IMU accelerometer noise: 0.2 m/s^2/sqrt(Hz)
+IMU accelerometer walk: 0.3 m/s^3/sqrt(Hz)
+
+Global Sensor to Body traslation (tbg): 
+[0.22183;
+ 0.01088;
+ -0.17569999]
+There are 1 cameras in the atlas
+Camera 0 is pinhole
+Loop Closing: 0
+Using GPS: true
+Starting the Viewer
+not IMU meas
+First KF:0; Map init KF:0
+New Map created with 570 points
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 8             rho = 0
+qmax = 8             rho = 0
+qmax = 8             rho = 0
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = 2.273736754432318e-10
+qmax = 10             rho = 1.4210854715202004e-11
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+SET FIRST GPS MEAS
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = 1.4210854715202001e-10
+qmax = 10             rho = 1.4210854715202001e-10
+qmax = 10             rho = 1.4210854715202001e-10
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = 0
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = -2.2737367544323126e-10
+qmax = 10             rho = -2.2737367544323126e-10
+qmax = 10             rho = -2.2737367544323126e-10
+qmax = 8             rho = 0
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = -1.7337242750968076e-09
+qmax = 10             rho = -1.7337242750968076e-09
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 5             rho = 0
+_nBad>=3
+qmax = 10             rho = 2.8421709430403987e-10
+qmax = 10             rho = 2.8421709430403987e-10
+qmax = 10             rho = 2.8421709430403987e-10
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = 0
+qmax = 9             rho = 0
+qmax = 9             rho = 0
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = 1.7053025658242381e-10
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = 0
+qmax = 10             rho = 0
+_nBad>=3
+_nBad>=3
+qmax = 9             rho = 0
+qmax = 9             rho = 0
+qmax = 9             rho = 0
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = -8.8107299233484924e-10
+qmax = 10             rho = -8.8107299233484924e-10
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 9             rho = 0
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 9             rho = 0
+qmax = 10             rho = -2.2737367544323206e-10
+qmax = 10             rho = -2.2737367544323206e-10
+qmax = 10             rho = -2.2737367544323206e-10
+qmax = 10             rho = 3.4106051316484757e-10
+qmax = 9             rho = 0
+qmax = 9             rho = 0
+qmax = 9             rho = 0
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 9             rho = 0
+qmax = 10             rho = 0
+qmax = 10             rho = 0
+qmax = 10             rho = 0
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 9             rho = 0
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = 9.0949470177292524e-10
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 8             rho = 0
+qmax = 8             rho = 0
+qmax = 8             rho = 0
+qmax = 10             rho = 0
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = 4.831690602920828e-10
+qmax = 10             rho = 4.831690602920828e-10
+qmax = 10             rho = 4.831690602920828e-10
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = -5.6843418860807976e-11
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = -1.4210854715201991e-10
+qmax = 10             rho = -1.4210854715201991e-10
+qmax = 9             rho = 0
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = -1.5916157281024052e-09
+_nBad>=3
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = -1.7053025658242404e-10
+qmax = 10             rho = -1.7053025658242404e-10
+qmax = 10             rho = -1.7053025658242404e-10
+_nBad>=3
+_nBad>=3
+_nBad>=3
+qmax = 10             rho = 1.1368683772161598e-10
+_nBad>=3
+qmax = 10             rho = 5.9685589803844879e-10
+qmax = 10             rho = 5.9685589803844879e-10
+qmax = 10             rho = 5.9685589803844879e-10
+_nBad>=3
+qmax = 10             rho = -4.6109782415855875e-09
+qmax = 10             rho = -0.2315347920558242
+Not enough motion for initializing. Reseting...
+LM: Reseting current map in Local Mapping...
+LM: End reseting Local Mapping...
+LM: Reset free the mutex
+start VIBA 1
+qmax = 10             rho = -6.7714722182177032e-09
+qmax = 10             rho = -0.1681685625787076
+end VIBA 1
+start VIBA 2
+_nBad>=3
+_nBad>=3
+end VIBA 2
+size gps: 95
+size poses: 95
+poses to align: 96
+ALIGNED!
+Shutting down...
+Shutdown
+
+Saving trajectory to CameraTrajectoryGPSOpt.txt ...
+There are 1 maps in the atlas
+  Map 0 has 395 KFs
+
+End of saving trajectory to CameraTrajectoryGPSOpt.txt ...
+
+Saving keyframe trajectory to KeyFrameTrajectory.txt ...
+393 of 395 keyframes have a GPS Measurement.
