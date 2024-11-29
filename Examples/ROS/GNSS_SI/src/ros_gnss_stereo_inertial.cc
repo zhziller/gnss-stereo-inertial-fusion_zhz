@@ -296,11 +296,13 @@ void ImageGrabber::SyncWithImu()
   {
     cv::Mat imLeft, imRight;
     double tImLeft = 0, tImRight = 0;
+    //三类消息全部接收
     if (!imgLeftBuf.empty()&&!imgRightBuf.empty()&&!mpImuGb->imuBuf.empty())
     {
       tImLeft = imgLeftBuf.front()->header.stamp.toSec();
       tImRight = imgRightBuf.front()->header.stamp.toSec();
 
+      // 当右图像早于左图像很多，删去部分右图像
       this->mBufMutexRight.lock();
       while((tImLeft-tImRight)>maxTimeDiff && imgRightBuf.size()>1)
       {
@@ -308,7 +310,8 @@ void ImageGrabber::SyncWithImu()
         tImRight = imgRightBuf.front()->header.stamp.toSec();
       }
       this->mBufMutexRight.unlock();
-
+      
+      // 当左图像早于右图像很多，删去部分左图像
       this->mBufMutexLeft.lock();
       while((tImRight-tImLeft)>maxTimeDiff && imgLeftBuf.size()>1)
       {
@@ -317,11 +320,16 @@ void ImageGrabber::SyncWithImu()
       }
       this->mBufMutexLeft.unlock();
 
+      //处理完了还是差距很大说明目前图像有问题
+      //双目图像这部分一般不会出同步的问题，会出问题的是两个不同的图像
       if((tImLeft-tImRight)>maxTimeDiff || (tImRight-tImLeft)>maxTimeDiff)
       {
         // std::cout << "big time difference" << std::endl;
         continue;
       }
+      // 比较图像和IMU的数据，保证图像数据在IMU数据序列前
+      // 感觉这里会有一点问题,没有保证图像前有IMU
+      // 同步主要在这
       if(tImLeft>mpImuGb->imuBuf.back()->header.stamp.toSec())
           continue;
 
@@ -337,6 +345,7 @@ void ImageGrabber::SyncWithImu()
 
       vector<ORB_SLAM3::IMU::Point> vImuMeas;
       vector<const ORB_SLAM3::GlobalPosition::GlobalPosition*> vGpsMeas;
+      // 读取IMU数据，当前帧图像前的所有IMU数据
       mpImuGb->mBufMutex.lock();
       if(!mpImuGb->imuBuf.empty())
       {
@@ -353,6 +362,7 @@ void ImageGrabber::SyncWithImu()
       }
       mpImuGb->mBufMutex.unlock();
 
+      // 读取GPS数据，当前帧图像前的所有GPS数据
       mpGpsGb->mBufMutex.lock();
       // TODO should we use a lock for mbUseGps?? In the future, we would like to modify this boolean in runtime
       if(mpGpsGb->mbUseGps && !mpGpsGb->gpsBuf.empty())
@@ -376,6 +386,7 @@ void ImageGrabber::SyncWithImu()
         mClahe->apply(imRight,imRight);
       }
 
+      // t265不用rectify
       if(do_rectify)
       {
         cv::remap(imLeft,imLeft,M1l,M2l,cv::INTER_LINEAR);

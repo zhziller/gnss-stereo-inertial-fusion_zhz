@@ -120,9 +120,9 @@ int main(int argc, char **argv)
     SLAM.Shutdown();
 
     // Save camera trajectory
-    SLAM.SaveKeyFrameTrajectoryTUM("/home/zou/traj/orbslam3/KeyFrameTrajectory_TUM_Format.txt");
-    SLAM.SaveTrajectoryTUM("/home/zou/traj/orbslam3/FrameTrajectory_TUM_Format.txt");
-    SLAM.SaveTrajectoryKITTI("/home/zou/traj/orbslam3/FrameTrajectory_KITTI_Format.txt");
+    SLAM.SaveKeyFrameTrajectoryTUM("/home/zou/traj/GNSS_orbslam/KeyFrameTrajectory_TUM_Format.txt");
+    SLAM.SaveTrajectoryTUM("/home/zou/traj/GNSS_orbslam/FrameTrajectory_TUM_Format.txt");
+    // SLAM.SaveTrajectoryKITTI("/home/zou/traj/orbslam3/FrameTrajectory_KITTI_Format.txt");
 
     ros::shutdown();
 
