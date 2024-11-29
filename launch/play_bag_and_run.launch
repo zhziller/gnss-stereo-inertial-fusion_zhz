@@ -3,10 +3,21 @@
     <arg name="bagfile"/>
     <arg name="launchfile" default="$(find GNSS_SI)/launch/rosario.launch" />
     <arg name="settings" default="$(find GNSS_SI)/../../Stereo-Inertial/rosario_dataset/Rosario_3_0.yaml"/>
-
+    <!-- 包含其他launch文件进行执行 -->
     <include file="$(arg launchfile)">
         <arg name="settings" value="$(arg settings)" />
     </include>
-    <node pkg="rosbag" type="play" name="rosbag_play" output="screen" required="true" args="--clock -d 5 $(arg bagfile)"/>
+    
+    <!-- 解压图像话题 -->
+    <node name="republish1" pkg="image_transport" type="republish" args="compressed in:=/camera/fisheye1/image_raw raw out:=/camera/left/image_raw">
+        <!-- 可以在这里添加remap参数或其他参数 -->
+    </node>
+
+    <node name="republish2" pkg="image_transport" type="republish" args="compressed in:=/camera/fisheye2/image_raw raw out:=/camera/right/image_raw">
+        <!-- 可以在这里添加remap参数或其他参数 -->
+    </node>
+
+    <node pkg="rosbag" type="play" name="rosbag_play" output="screen" required="true" args="--clock -d 6 $(arg bagfile)"/>
+    
 </launch>
 
