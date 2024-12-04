@@ -324,11 +324,11 @@ Sophus::SE3f System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, 
             mbResetActiveMap = false;
         }
     }
-
+    // IMU获取，当前帧前的数据
     if (mSensor == System::IMU_STEREO)
         for(size_t i_imu = 0; i_imu < vImuMeas.size(); i_imu++)
             mpTracker->GrabImuData(vImuMeas[i_imu]);
-
+    //GNSS获取，当前帧前的数据
     for(size_t i_g = 0; i_g < vMeas.size(); i_g++)
         mpTracker->GrabGpsData(vMeas[i_g]);
 

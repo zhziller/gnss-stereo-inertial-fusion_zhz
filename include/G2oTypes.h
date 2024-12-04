@@ -461,15 +461,23 @@ public:
     virtual bool read(std::istream& is){return false;}
     virtual bool write(std::ostream& os) const{return false;}
     //virtual void linearizeOplus();
+    // 自定义优化边中最关键的部分
     void computeError(){        
+        // 从两个关联顶点获取数据
+        // vPose是关键帧在世界坐标系下的坐标
         const VertexPose* vPose = static_cast<const VertexPose*>(_vertices[0]);
+        // vRotation是GNSS局部坐标系和世界坐标系间的刚性坐标变换
+        // 对应论文里的公式把ga换成A就看懂了
         const VertexRotation* vRotation = static_cast<const VertexRotation*>(_vertices[1]);
         Eigen::Matrix3d Rwb0 = Twb0.rotationMatrix();
         Eigen::Vector3d twb0 = Twb0.translation();
         Sophus::SE3d Trw(Eigen::Quaterniond(vPose->estimate().Rcw[0]), vPose->estimate().tcw[0]);
         Sophus::SE3d Tbc(Eigen::Quaterniond(vPose->estimate().Rbc[0]), vPose->estimate().tbc[0]);
         Sophus::SE3d Twbi = (Tbc * Tcir * Trw).inverse();
+        // RA0W*((Twbi * tBA) - (RwB0 * tBA + twB0))
         Eigen::Vector3d estimatedPos(vRotation->estimate() * ((Twbi * tbg) - (Rwb0 * tbg + twb0)));
+        // 残差值 = 测量值 - 估计值
+        // r_gi = hat(z)_i - R_A0_W(R_W_Bi*t_B_A + t_W_Bi - （R_W_B0*t_B_A + t_W_B0）)
         _error = _measurement - estimatedPos;
     }
 

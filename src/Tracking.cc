@@ -1545,7 +1545,12 @@ Sophus::SE3f Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat 
     else if(mSensor == System::STEREO && mpCamera2)
         mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,mpCamera2,mTlr,mpGlobalMeasCalib);
     else if(mSensor == System::IMU_STEREO && !mpCamera2)
-        mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,mpGlobalMeasCalib,&mLastFrame,*mpImuCalib);
+        // GNSS_IMU_Stereo模式下的Frame构建
+        // 与原ORBSLAM没有区别
+        mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,
+        mpGlobalMeasCalib,  // 根据天线杆臂计算出的GNSS矫正器
+        &mLastFrame,
+        *mpImuCalib);       // 根据IMU外参和噪声获取的IMU矫正器
     else if(mSensor == System::IMU_STEREO && mpCamera2)
         mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth,mpCamera,mpCamera2,mTlr,mpGlobalMeasCalib,&mLastFrame,*mpImuCalib);
 
@@ -1675,6 +1680,8 @@ void Tracking::GrabGpsData(const GlobalPosition::GlobalPosition* gpsMeasurement)
 {
     unique_lock<mutex> lock(mMutexGpsQueue);
     //mlQueueGpsData.push_back(gpsMeasurement);
+    // 参考关键帧存在 且 当前GNSS观测在参考关键帧后
+    // ! 这里可以再添加条件对MEAS进行筛选，GPS信号太差时不要了
     if(mpReferenceKF && gpsMeasurement->timestamp >= mpReferenceKF->mTimeStamp)
     {   
         mpReferenceKF->AddGlobalPositionMeas(gpsMeasurement);                                
@@ -1898,6 +1905,8 @@ void Tracking::Track()
         mbStep = false;
     }
 
+    // Step 1 如局部建图里认为IMU有问题，重置当前活跃地图
+    // 在IMU模式中IMU初始化失败时这个参数会被设置为True
     if(mpLocalMapper->mbBadImu)
     {
         cout << "TRACK: Reset map because local mapper set the bad imu flag " << endl;
@@ -1905,12 +1914,14 @@ void Tracking::Track()
         return;
     }
 
+    // 从Atlas中取出当前active的地图
     Map* pCurrentMap = mpAtlas->GetCurrentMap();
     if(!pCurrentMap)
     {
         cout << "ERROR: There is not an active map in the atlas" << endl;
     }
 
+    // Step 2 处理时间戳异常的情况
     if(mState!=NO_IMAGES_YET)
     {
         if(mLastFrame.mTimeStamp>mCurrentFrame.mTimeStamp)
@@ -1951,7 +1962,7 @@ void Tracking::Track()
         }
     }
 
-
+    // Step 3 IMU模式下设置IMU的Bias参数,还要保证上一帧存在
     if ((mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD) && mpLastKeyFrame)
         mCurrentFrame.SetNewBias(mpLastKeyFrame->GetImuBias());
 
@@ -1961,7 +1972,8 @@ void Tracking::Track()
     }
 
     mLastProcessedState=mState;
-
+    // Step 4 IMU模式且没有创建地图的情况下对IMU数据进行预积分
+    // 也就是在两帧frame之间创建IMU预积分构建器
     if ((mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD) && !mbCreatedMap)
     {
 #ifdef REGISTER_TIMES
@@ -1991,7 +2003,8 @@ void Tracking::Track()
         mbMapUpdated = true;
     }
 
-
+    // Step 5 初始化
+    // TODO ：这部分可能要改，实现无GNSS的初始化
     if(mState==NOT_INITIALIZED)
     {
         if(mSensor==System::STEREO || mSensor==System::RGBD || mSensor==System::IMU_STEREO || mSensor==System::IMU_RGBD)
@@ -2026,6 +2039,7 @@ void Tracking::Track()
 #endif
 
         // Initial camera pose estimation using motion model or relocalization (if tracking is lost)
+        // Step 1 帧间跟踪
         if(!mbOnlyTracking)
         {
 
@@ -2071,6 +2085,7 @@ void Tracking::Track()
                     }
                 }
             }
+            // ! lost的情况，也能改
             else
             {
 
@@ -2127,8 +2142,8 @@ void Tracking::Track()
                     return;
                 }
             }
-
         }
+        // ! 纯定位模式，这部分先不看
         else
         {
             // Localization Mode: Local Mapping is deactivated (TODO Not available in inertial mode)
@@ -2200,7 +2215,7 @@ void Tracking::Track()
                 }
             }
         }
-
+        // 将最新的关键帧作为当前帧的参考关键帧
         if(!mCurrentFrame.mpReferenceKF)
             mCurrentFrame.mpReferenceKF = mpReferenceKF;
 
@@ -2216,6 +2231,7 @@ void Tracking::Track()
         std::chrono::steady_clock::time_point time_StartLMTrack = std::chrono::steady_clock::now();
 #endif
         // If we have an initial estimation of the camera pose and matching. Track the local map.
+        // Step 2 局部地图跟踪，帧间匹配成功获取初始位姿后进行局部地图跟踪
         if(!mbOnlyTracking)
         {
             if(bOK)
@@ -2223,9 +2239,10 @@ void Tracking::Track()
                 bOK = TrackLocalMap();
 
             }
-            if(!bOK)
+            if(!bOK)    // 局部地图跟踪失败
                 cout << "Fail to track local map!" << endl;
         }
+        // ! 纯定位模式，这部分先不看
         else
         {
             // mbVO true means that there are few matches to MapPoints in the map. We cannot retrieve
@@ -2234,16 +2251,35 @@ void Tracking::Track()
             if(bOK && !mbVO)
                 bOK = TrackLocalMap();
         }
+        // 到此为止跟踪确定位姿阶段结束，下面开始做收尾工作和为下一帧做准备
 
-        if(bOK)
+        // 查看到此为止时的两个状态变化
+        // bOK的历史变化---上一帧跟踪成功---当前帧跟踪成功---局部地图跟踪成功---true                     -->OK   1 跟踪局部地图成功
+        //          \               \              \---局部地图跟踪失败---false
+        //           \               \---当前帧跟踪失败---false
+        //            \---上一帧跟踪失败---重定位成功---局部地图跟踪成功---true                       -->OK  2 重定位
+        //                          \           \---局部地图跟踪失败---false
+        //                           \---重定位失败---false
+
+        //
+        // mState的历史变化---上一帧跟踪成功---当前帧跟踪成功---局部地图跟踪成功---OK                  -->OK  1 跟踪局部地图成功
+        //            \               \              \---局部地图跟踪失败---OK                  -->OK  3 正常跟踪
+        //             \               \---当前帧跟踪失败---非OK
+        //              \---上一帧跟踪失败---重定位成功---局部地图跟踪成功---非OK
+        //                            \           \---局部地图跟踪失败---非OK
+        //                             \---重定位失败---非OK（传不到这里，因为直接return了）
+        // 由上图可知当前帧的状态OK的条件是跟踪局部地图成功，重定位或正常跟踪都可
+        if(bOK)//帧间跟踪成功且局部地图跟踪成功
             mState = OK;
-        else if (mState == OK)
-        {
+        else if (mState == OK)//局部地图跟踪失败，帧间跟踪成功
+        {   
+            // 状态变为最近丢失
             if (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
             {
                 Verbose::PrintMess("Track lost for less than one second...", Verbose::VERBOSITY_NORMAL);
                 if(!pCurrentMap->isImuInitialized() || !pCurrentMap->GetIniertialBA2())
                 {
+                    // IMU模式下IMU没有成功初始化或者没有完成IMU BA，则重置当前地图
                     cout << "IMU is not or recently initialized. Reseting active map..." << endl;
                     mpSystem->ResetActiveMap();
                 }
@@ -2258,7 +2294,7 @@ void Tracking::Track()
                 mTimeStampLost = mCurrentFrame.mTimeStamp;
             //}
         }
-
+        // 这段貌似没啥作用
         // Save frame if recent relocalization, since they are used for IMU reset (as we are making copy, it shluld be once mCurrFrame is completely modified)
         if((mCurrentFrame.mnId<(mnLastRelocFrameId+mnFramesToResetIMU)) && (mCurrentFrame.mnId > mnFramesToResetIMU) &&
            (mSensor == System::IMU_MONOCULAR || mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD) && pCurrentMap->isImuInitialized())
@@ -2271,7 +2307,7 @@ void Tracking::Track()
             // Load preintegration
             pF->mpImuPreintegratedFrame = new IMU::Preintegrated(mCurrentFrame.mpImuPreintegratedFrame);
         }
-
+        // 下面代码没有用
         if(pCurrentMap->isImuInitialized())
         {
             if(bOK)
@@ -2294,6 +2330,7 @@ void Tracking::Track()
 #endif
 
         // Update drawer
+        // 更新显示线程中的图像、特征点、地图点等信息
         mpFrameDrawer->Update(this);
         if(mCurrentFrame.isSet())
             mpMapDrawer->SetCurrentCameraPose(mCurrentFrame.GetPose());
@@ -2337,6 +2374,10 @@ void Tracking::Track()
 #ifdef REGISTER_TIMES
             std::chrono::steady_clock::time_point time_StartNewKF = std::chrono::steady_clock::now();
 #endif
+            // Step 3 关键帧判断及更新
+            // 需要同时满足下面条件1和2
+            // 条件1：bNeedKF=true，需要插入关键帧
+            // 条件2：bOK=true跟踪成功 或 IMU模式下的RECENTLY_LOST模式且mInsertKFsLost为true
             bool bNeedKF = NeedNewKeyFrame();
 
             // Check if we need to insert a new keyframe
@@ -2392,17 +2433,19 @@ void Tracking::Track()
 
     //AssociateGpsMeasToKF();
 
-
+    // Step 记录位姿信息，用于最后保存所有的轨迹
     if(mState==OK || mState==RECENTLY_LOST)
     {
         // Store frame pose information to retrieve the complete camera trajectory afterwards.
         if(mCurrentFrame.isSet())
         {
+            // Tcr_:当前帧pose相对参考关键帧的pose
             Sophus::SE3f Tcr_ = mCurrentFrame.GetPose() * mCurrentFrame.mpReferenceKF->GetPoseInverse();
             mlRelativeFramePoses.push_back(Tcr_);
             mlpReferences.push_back(mCurrentFrame.mpReferenceKF);
             mlFrameTimes.push_back(mCurrentFrame.mTimeStamp);
             mlbLost.push_back(mState==LOST);
+            // 给关键帧添加以这个关键帧为参考的帧的位姿
             mCurrentFrame.mpReferenceKF->AddFrameRelativePose(mCurrentFrame.mTimeStamp, Tcr_);
         }
         else
@@ -2428,7 +2471,7 @@ void Tracking::Track()
 #endif
 }
 
-
+// 初始化没有GPS？
 void Tracking::StereoInitialization()
 {
     if(mCurrentFrame.N>500)
@@ -2449,7 +2492,7 @@ void Tracking::StereoInitialization()
 
             if(mpImuPreintegratedFromLastKF)
                 delete mpImuPreintegratedFromLastKF;
-
+            // 预积分
             mpImuPreintegratedFromLastKF = new IMU::Preintegrated(IMU::Bias(),*mpImuCalib);
             mCurrentFrame.mpImuPreintegrated = mpImuPreintegratedFromLastKF;
         }
@@ -3049,8 +3092,9 @@ bool Tracking::TrackLocalMap()
     // We have an estimation of the camera pose and some map points tracked in the frame.
     // We retrieve the local map and try to find matches to points in the local map.
     mTrackedFr++;
-
+    // Step 1：更新局部关键帧 mvpLocalKeyFrames 和局部地图点 mvpLocalMapPoints
     UpdateLocalMap();
+    // Step 2：筛选局部地图中新增的在视野范围内的地图点，投影到当前帧搜索匹配，得到更多的匹配关系
     SearchLocalPoints();
 
     // TOO check outliers before PO
@@ -3064,10 +3108,13 @@ bool Tracking::TrackLocalMap()
         }
 
     int inliers;
+    // Step 3：前面新增了更多的匹配关系，BA优化得到更准确的位姿
     if (!mpAtlas->isImuInitialized())
+        // IMU未初始化，仅优化位姿（可能是针对纯视觉模式）
         Optimizer::PoseOptimization(&mCurrentFrame);
     else
-    {
+    {   
+        // ? 这里不是很明确是什么定位状态
         if(mCurrentFrame.mnId<=mnLastRelocFrameId+mnFramesToResetIMU)
         {
             Verbose::PrintMess("TLM: PoseOptimization ", Verbose::VERBOSITY_DEBUG);
@@ -3076,19 +3123,22 @@ bool Tracking::TrackLocalMap()
         else
         {
             // if(!mbMapUpdated && mState == OK) //  && (mnMatchesInliers>30))
+            // ? 地图未被更新？，如何更新，更新的哪个地图
             if(!mbMapUpdated) //  && (mnMatchesInliers>30))
             {
                 Verbose::PrintMess("TLM: PoseInertialOptimizationLastFrame ", Verbose::VERBOSITY_DEBUG);
+                // 使用上一普通帧以及当前帧的视觉信息和IMU信息联合优化当前帧位姿、速度和IMU零偏
                 inliers = Optimizer::PoseInertialOptimizationLastFrame(&mCurrentFrame); // , !mpLastKeyFrame->GetMap()->GetIniertialBA1());
             }
             else
             {
                 Verbose::PrintMess("TLM: PoseInertialOptimizationLastKeyFrame ", Verbose::VERBOSITY_DEBUG);
+                // 使用上一关键帧以及当前帧的视觉信息和IMU信息联合优化当前帧位姿、速度和IMU零偏
                 inliers = Optimizer::PoseInertialOptimizationLastKeyFrame(&mCurrentFrame); // , !mpLastKeyFrame->GetMap()->GetIniertialBA1());
             }
         }
     }
-
+    // 查看内外点数目，调试用
     aux1 = 0, aux2 = 0;
     for(int i=0; i<mCurrentFrame.N; i++)
         if( mCurrentFrame.mvpMapPoints[i])
@@ -3101,6 +3151,7 @@ bool Tracking::TrackLocalMap()
     mnMatchesInliers = 0;
 
     // Update MapPoints Statistics
+    // Step 4：更新当前帧的地图点被观测程度，并统计跟踪局部地图后匹配数目
     for(int i=0; i<mCurrentFrame.N; i++)
     {
         if(mCurrentFrame.mvpMapPoints[i])
@@ -3124,6 +3175,7 @@ bool Tracking::TrackLocalMap()
     // Decide if the tracking was succesful
     // More restrictive if there was a relocalization recently
     mpLocalMapper->mnMatchesInliers=mnMatchesInliers;
+    // Step 5：根据跟踪匹配数目及重定位情况决定是否跟踪成功
     if(mCurrentFrame.mnId<mnLastRelocFrameId+mMaxFrames && mnMatchesInliers<50)
         return false;
 
@@ -3312,18 +3364,20 @@ bool Tracking::NeedNewKeyFrame()
 
 void Tracking::CreateNewKeyFrame()
 {
+    // 如果局部建图线程正在初始化且没做完或关闭了,就无法插入关键帧
     if(mpLocalMapper->IsInitializing() && !mpAtlas->isImuInitialized())
         return;
 
     if(!mpLocalMapper->SetNotStop(true))
         return;
-
+    // Step 1：将当前帧构造成关键帧
     KeyFrame* pKF = new KeyFrame(mCurrentFrame,mpAtlas->GetCurrentMap(),mpKeyFrameDB);
 
     if(mpAtlas->isImuInitialized()) //  || mpLocalMapper->IsInitializing())
         pKF->bImu = true;
 
     pKF->SetNewBias(mCurrentFrame.mImuBias);
+    // Step 2：将当前关键帧设置为当前帧的参考关键帧
     mpReferenceKF = pKF;
     mCurrentFrame.mpReferenceKF = pKF;
 
@@ -3340,7 +3394,8 @@ void Tracking::CreateNewKeyFrame()
     {
         mpImuPreintegratedFromLastKF = new IMU::Preintegrated(pKF->GetImuBias(),pKF->mImuCalib);
     }
-
+    // Step 3：对于双目或rgbd摄像头，为当前帧生成新的地图点；单目无操作
+    // 选取为关键帧时补充地图点
     if(mSensor!=System::MONOCULAR && mSensor != System::IMU_MONOCULAR) // TODO check if incluide imu_stereo
     {
         mCurrentFrame.UpdatePoseMatrices();
@@ -3351,7 +3406,7 @@ void Tracking::CreateNewKeyFrame()
         int maxPoint = 100;
         if(mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
             maxPoint = 100;
-
+        // Step 3.1：得到当前帧有深度值的特征点（不一定是地图点）
         vector<pair<float,int> > vDepthIdx;
         int N = (mCurrentFrame.Nleft != -1) ? mCurrentFrame.Nleft : mCurrentFrame.N;
         vDepthIdx.reserve(mCurrentFrame.N);
@@ -3365,9 +3420,9 @@ void Tracking::CreateNewKeyFrame()
         }
 
         if(!vDepthIdx.empty())
-        {
+        {   // Step 3.2：按照深度从小到大排序
             sort(vDepthIdx.begin(),vDepthIdx.end());
-
+            // Step 3.3：从中找出不是地图点的生成临时地图点 
             int nPoints = 0;
             for(size_t j=0; j<vDepthIdx.size();j++)
             {
@@ -3418,7 +3473,9 @@ void Tracking::CreateNewKeyFrame()
                 {
                     nPoints++;
                 }
-
+                // Step 3.4：停止新建地图点必须同时满足以下条件：
+                // 1、当前的点的深度已经超过了设定的深度阈值（35倍基线）
+                // 2、nPoints已经超过100个点，说明距离比较远了，可能不准确，停掉退出
                 if(vDepthIdx[j].first>mThDepth && nPoints>maxPoint)
                 {
                     break;
@@ -3428,17 +3485,24 @@ void Tracking::CreateNewKeyFrame()
         }
     }
 
-
+    // Step 4：插入关键帧
+    // 关键帧插入到列表 mlNewKeyFrames中，等待local mapping线程临幸
     mpLocalMapper->InsertKeyFrame(pKF);
-
+    // 插入好了，允许局部建图停止
     mpLocalMapper->SetNotStop(false);
-
+    // 当前帧成为新的关键帧，更新
     mnLastKeyFrameId = mCurrentFrame.mnId;
     mpLastKeyFrame = pKF;
 
+    // Step 5: 设置GNSS原点
+    // ? 这步是不是没用？
     std::list<const GlobalPosition::GlobalPosition*> measurementsAssociatedToKF;
     
+    // mpReferenceKF:当前参考关键帧，其实就是当前帧
+    // mPrevKF: 前一帧关键帧，预积分是从上一帧关键帧到当前帧
+    // ProcessGlobalPositionMeas():处理GNSS测量值
     mpReferenceKF->mPrevKF->ProcessGlobalPositionMeas();
+    // Step 5.1 条件：还没有设置GNSS原点 且 上一帧参考关键帧存在 且 上一次参考关键帧附件有GNSS观测
     if(setGlobalPosOrigin && mpReferenceKF->mPrevKF && mpReferenceKF->mPrevKF->HasGlobalPositionMeas())
     {
         setGlobalPosOrigin = false;

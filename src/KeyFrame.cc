@@ -1187,6 +1187,7 @@ void KeyFrame::AddGlobalPositionMeas(const GlobalPosition::GlobalPosition* meas)
     globalPositionMeasBeforeProp.push_back(meas);
 }
 
+// 在GNSS出插入一个pose
 void KeyFrame::ProcessGlobalPositionMeas()
 {
     unique_lock<mutex> lock(mMutexGpsMeas);
@@ -1198,11 +1199,13 @@ void KeyFrame::ProcessGlobalPositionMeas()
     int pushed = 0;
     for(auto globalMeas : globalPositionMeasBeforeProp)
     {
+        // Step 1 找一帧最接近GNSS的普通帧
         while(framePoseIt->first < globalMeas->timestamp && framePoseIt != frameRelativePoses.end())
         {
             framePoseIt++;
         }
         
+        // Step 2 第一帧就是最靠近GNSS的帧，第一帧就是关键帧吧
         if(framePoseIt == frameRelativePoses.begin())
         {
             /*auto nextFrame = *framePoseIt;
@@ -1220,9 +1223,12 @@ void KeyFrame::ProcessGlobalPositionMeas()
             std::cout << "continue" << std::endl;
             continue;
         }
-        
+        //  Step 3 参考帧全部小于GNSS
         if(framePoseIt == frameRelativePoses.end())
         {
+            //下一帧KF存在
+            // ------|------------|-------------frameRelativePoses.end(),mNextKF
+            // ------------|--------------------globalMeas
             if(mNextKF)
             {
                 auto prevFrame = *(std::prev(framePoseIt));
@@ -1240,8 +1246,11 @@ void KeyFrame::ProcessGlobalPositionMeas()
             //else
                 //std::cout << "DROPPED" << std::endl;
         }
+        // Step 4 GNSS在两帧参考帧之间
         else
         {
+            // ------|------------|-------------prevFrame,currFrame
+            // ------------|--------------------globalMeas
             auto prevFrame = *(std::prev(framePoseIt));
             auto currFrame = *framePoseIt; 
             Sophus::SE3f TRelPrev = prevFrame.second;
@@ -1271,6 +1280,7 @@ std::vector<const GlobalPosition::GlobalPosition*> KeyFrame::GetGlobalPositionMe
     return globalPositionMeas;
 }
 
+// 添加关键帧的相关帧的位姿
 void KeyFrame::AddFrameRelativePose(double timestamp, Sophus::SE3f frameRelativePose)
 {
     unique_lock<mutex> lock(mMutexGpsMeas);

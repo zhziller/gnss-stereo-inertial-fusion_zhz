@@ -413,7 +413,13 @@ void GpsGrabber::GrabGps(const sensor_msgs::NavSatFixConstPtr &gps_msg)
 {
   if(!mbUseGps)
     return;
- 
+  double interval = 50;
+  double start_time = 1732097611;
+  if(gps_msg->header.stamp.toSec() < start_time + interval) 
+    std::cout<<"unUse GPS"<<std::endl;
+    return; 
+
+  // start_time += 5*interval;
   Eigen::Matrix3d covariance;
   const int POSITION_SIZE = 3;
   if(noiseStdDev == 0.0)

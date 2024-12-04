@@ -2569,25 +2569,44 @@ int Optimizer::OptimizeSim3(KeyFrame *pKF1, KeyFrame *pKF2, vector<MapPoint *> &
 
     return nIn;
 }
-
+/**
+ * @brief 局部地图＋惯导BA LocalMapping IMU中使用，地图经过imu初始化时用这个函数代替LocalBundleAdjustment
+ *
+ * @param[in] pKF               //关键帧
+ * @param[in] pbStopFlag        //是否停止的标志
+ * @param[in] pMap              //地图
+ * @param[in] num_fixedKF       //固定不优化关键帧的数目
+ * @param[in] num_OptKF
+ * @param[in] num_MPs
+ * @param[in] num_edges
+ * @param[in] bLarge            成功跟踪匹配的点数是否足够多
+ * @param[in] bRecInit          经过BA2初始化后这个变量为false
+ */
 void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_edges, bool bLarge, bool bRecInit)
 {
+    // Step 1. 确定待优化的关键帧们
     Map* pCurrentMap = pKF->GetMap();
 
+    // 单轮最大优化次数
     int maxOpt=10;
+    // 优化轮次
     int opt_it=10;
     if(bLarge)
     {
         maxOpt=25;
         opt_it=4;
     }
+    // 预计待优化的关键帧数，min函数是为了控制优化关键帧的数量
+    // 也就是最大不超过25帧
     const int Nd = std::min((int)pCurrentMap->KeyFramesInMap()-2,maxOpt);
     const unsigned long maxKFid = pKF->mnId;
 
     vector<KeyFrame*> vpOptimizableKFs;
+    // 当前关键帧的共视关键帧
     const vector<KeyFrame*> vpNeighsKFs = pKF->GetVectorCovisibleKeyFrames();
     list<KeyFrame*> lpOptVisKFs;
 
+    // 为待优化的关键帧预留空间
     vpOptimizableKFs.reserve(Nd);
     vpOptimizableKFs.push_back(pKF);
     pKF->mnBALocalForKF = pKF->mnId;
@@ -2605,6 +2624,7 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
     int N = vpOptimizableKFs.size();
 
     // Optimizable points seen by temporal optimizable keyframes
+    // Step 2. 确定这些关键帧对应的地图点，存入lLocalMapPoints
     list<MapPoint*> lLocalMapPoints;
     for(int i=0; i<N; i++)
     {
@@ -2623,6 +2643,7 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
     }
 
     // Fixed Keyframe: First frame previous KF to optimization window)
+    // Step 3. 固定一帧，为vpOptimizableKFs中最早的那一关键帧的上一关键帧，如果没有上一关键帧了就用最早的那一帧，毕竟目前得到的地图虽然有尺度但并不是绝对的位置
     list<KeyFrame*> lFixedKeyFrames;
     if(vpOptimizableKFs.back()->mPrevKF)
     {
@@ -2638,6 +2659,9 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
     }
 
     // Optimizable visual KFs
+    // Step 4. 做了一系列操作发现最后lpOptVisKFs为空。这段应该是调试遗留代码，如果实现的话其实就是把共视图中在前面没有加过的关键帧们加进来，
+    // 但作者可能发现之前就把共视图的全部帧加进来了，也有可能发现优化的效果不好浪费时间
+    // 获得与当前关键帧有共视关系的一些关键帧，大于15个点，排序为从小到大
     const int maxCovKF = 0;
     for(int i=0, iend=vpNeighsKFs.size(); i<iend; i++)
     {
@@ -2668,6 +2692,7 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
     }
 
     // Fixed KFs which are not covisible optimizable
+    // Step 5. 将所有mp点对应的关键帧（除了前面加过的）放入到固定组里面，后面优化时不改变
     const int maxFixKF = 200;
 
     for(list<MapPoint*>::iterator lit=lLocalMapPoints.begin(), lend=lLocalMapPoints.end(); lit!=lend; lit++)
@@ -2694,6 +2719,7 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
     bool bNonFixed = (lFixedKeyFrames.size() == 0);
 
     // Setup optimizer
+    // Step 6. 构造优化器，正式开始优化
     g2o::SparseOptimizer optimizer;
     g2o::BlockSolverX::LinearSolverType * linearSolver;
     linearSolver = new g2o::LinearSolverEigen<g2o::BlockSolverX::PoseMatrixType>();
@@ -2715,6 +2741,7 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
 
 
     // Set Local temporal KeyFrame vertices
+    // Step 7. 建立关于关键帧的节点，其中包括，位姿，速度，以及两个偏置
     N=vpOptimizableKFs.size();
     for(int i=0; i<N; i++)
     {
@@ -2743,6 +2770,7 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
     }
 
     // Set Local visual KeyFrame vertices
+    // Step 8. 建立关于共视关键帧的节点，但这里为空
     for(list<KeyFrame*>::iterator it=lpOptVisKFs.begin(), itEnd = lpOptVisKFs.end(); it!=itEnd; it++)
     {
         KeyFrame* pKFi = *it;
@@ -2753,6 +2781,7 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
     }
 
     // Set Fixed KeyFrame vertices
+    // Step 9. 建立关于固定关键帧的节点，其中包括，位姿，速度，以及两个偏置
     for(list<KeyFrame*>::iterator lit=lFixedKeyFrames.begin(), lend=lFixedKeyFrames.end(); lit!=lend; lit++)
     {
         KeyFrame* pKFi = *lit;
@@ -2782,7 +2811,7 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
     vector<EdgeInertial*> vei(N,(EdgeInertial*)NULL);
     vector<EdgeGyroRW*> vegr(N,(EdgeGyroRW*)NULL);
     vector<EdgeAccRW*> vear(N,(EdgeAccRW*)NULL);
-
+    // Step 10. 建立惯性边，没有imu跳过
     for(int i=0;i<N;i++)
     {
         KeyFrame* pKFi = vpOptimizableKFs[i];
@@ -2825,6 +2854,8 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
                 // last optimizable keyframe inside of the local window and the first fixed keyframe out. The
                 // information matrix for this measurement is also downweighted. This is done to avoid accumulating
                 // error due to fixing variables.
+                // 所有惯性残差都没有鲁棒核，但不包括窗口内最早一个可优化关键帧与第一个固定关键帧链接起来的惯性残差。
+                // 该度量的信息矩阵也被降权。这样做是为了避免由于固定变量而累积错误。
                 g2o::RobustKernelHuber* rki = new g2o::RobustKernelHuber;
                 vei[i]->setRobustKernel(rki);
                 if(i==N-1)
@@ -2876,7 +2907,7 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
     vpMapPointEdgeStereo.reserve(nExpectedSize);
 
 
-
+    // Step 11 建立视觉边
     const float thHuberMono = sqrt(5.991);
     const float chi2Mono2 = 5.991;
     const float thHuberStereo = sqrt(7.815);
@@ -3026,7 +3057,7 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
     {
         assert(mit->second>=3);
     }
-
+    // Step 12 开始优化
     optimizer.initializeOptimization();
     optimizer.computeActiveErrors();
     float err = optimizer.activeRobustChi2();
@@ -3037,7 +3068,7 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
 
     vector<pair<KeyFrame*,MapPoint*> > vToErase;
     vToErase.reserve(vpEdgesMono.size()+vpEdgesStereo.size());
-
+    // Step 13. 开始确认待删除的连接关系
     // Check inlier observations
     // Mono
     for(size_t i=0, iend=vpEdgesMono.size(); i<iend;i++)
@@ -3085,7 +3116,7 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
     }
 
 
-
+    // Step 14. 删除连接关系
     if(!vToErase.empty())
     {
         for(size_t i=0;i<vToErase.size();i++)
@@ -3099,7 +3130,8 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
 
     for(list<KeyFrame*>::iterator lit=lFixedKeyFrames.begin(), lend=lFixedKeyFrames.end(); lit!=lend; lit++)
         (*lit)->mnBAFixedForKF = 0;
-
+    
+    // Step 15 获取结果
     // Recover optimized data
     // Local temporal Keyframes
     N=vpOptimizableKFs.size();
@@ -3147,32 +3179,58 @@ void Optimizer::LocalInertialBA(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int&
     pMap->IncreaseChangeIndex();
 }
 
+// 利用GNSS进行优化
+/**
+ * @brief 局部地图＋惯导+GNSS BA LocalMapping IMU中使用，地图经过imu初始化时并且接受到GNSS时用这个函数代替LocalBundleAdjustment
+ *
+ * @param[in] pKF               //关键帧
+ * @param[in] pbStopFlag        //是否停止的标志
+ * @param[in] pMap              //地图
+ * @param[in] num_fixedKF       //固定不优化关键帧的数目
+ * @param[in] num_OptKF
+ * @param[in] num_MPs
+ * @param[in] num_edges
+ * @param[in] alignmentRotationFixed //是否优化gnss局部坐标和世界坐标系之间的旋转
+ * @param[in] bLarge            成功跟踪匹配的点数是否足够多
+ * @param[in] bRecInit          经过BA2初始化后这个变量为false
+ */
 void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, Map *pMap, int& num_fixedKF, int& num_OptKF, int& num_MPs, int& num_edges, bool alignmentRotationFixed, bool bLarge, bool bRecInit)
 {
+    // Step 1. 确定待优化的关键帧们：待优化关键帧的及其共视关键帧
+    // 获取当前活跃地图
     Map* pCurrentMap = pKF->GetMap();
 
-    int maxOpt=10;
-    int opt_it=10;
+    int maxOpt=10; // 最大优化关键帧数
+    int opt_it=10; // 优化轮次
     if(bLarge)
     {
         maxOpt=25;
         opt_it=4;
     }
+    // 预计待优化的关键帧数，min函数是为了控制优化关键帧的数量
     const int Nd = std::min((int)pCurrentMap->KeyFramesInMap()-2,maxOpt);
     const unsigned long maxKFid = pKF->mnId;
 
+    // 储存待优化关键帧的容器
     vector<KeyFrame*> vpOptimizableKFs;
+    // 获取当前关键帧的共视关键帧
     const vector<KeyFrame*> vpNeighsKFs = pKF->GetVectorCovisibleKeyFrames();
     list<KeyFrame*> lpOptVisKFs;
 
+    // 为容器预留空间
     vpOptimizableKFs.reserve(Nd);
+    // 当前关键帧入容器
     vpOptimizableKFs.push_back(pKF);
+    // ? 没看懂，感觉像一个标准位，表示该变量是跟着哪帧关键帧进行优化的，在Step5中用到了
     pKF->mnBALocalForKF = pKF->mnId;
     for(int i=1; i<Nd; i++)
     {
+        // 当前一关键帧存在
         if(vpOptimizableKFs.back()->mPrevKF)
         {
+            // 前一关键帧加入容器
             vpOptimizableKFs.push_back(vpOptimizableKFs.back()->mPrevKF);
+            // 和3225行的操作一样
             vpOptimizableKFs.back()->mnBALocalForKF = pKF->mnId;
         }
         else
@@ -3182,6 +3240,7 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
     int N = vpOptimizableKFs.size();
 
     // Optimizable points seen by temporal optimizable keyframes
+    // Step 2. 确定这些关键帧对应的地图点，存入lLocalMapPoints
     list<MapPoint*> lLocalMapPoints;
     for(int i=0; i<N; i++)
     {
@@ -3200,14 +3259,18 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
     }
 
     // Fixed Keyframe: First frame previous KF to optimization window)
+    // Step 3. 固定一帧，为vpOptimizableKFs中最早的那一关键帧的上一关键帧，如果没有上一关键帧了就用最早的那一帧，毕竟目前得到的地图虽然有尺度但并不是绝对的位置
     list<KeyFrame*> lFixedKeyFrames;
     if(vpOptimizableKFs.back()->mPrevKF)
     {
+        //vpOptimizableKFs中最早的那一关键帧的上一关键帧
         lFixedKeyFrames.push_back(vpOptimizableKFs.back()->mPrevKF);
         vpOptimizableKFs.back()->mPrevKF->mnBAFixedForKF=pKF->mnId;
     }
     else
     {
+        //没有上一关键帧了就用最早的那一帧
+        //把最早的那帧设置为固定帧，并从待优化容器中剔除
         vpOptimizableKFs.back()->mnBALocalForKF=0;
         vpOptimizableKFs.back()->mnBAFixedForKF=pKF->mnId;
         lFixedKeyFrames.push_back(vpOptimizableKFs.back());
@@ -3215,10 +3278,16 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
     }
 
     // Optimizable visual KFs
+    // Step 4. 做了一系列操作发现最后lpOptVisKFs为空。这段应该是调试遗留代码，如果实现的话其实就是把共视图中在前面没有加过的关键帧们加进来，
+    // 但作者可能发现之前就把共视图的全部帧加进来了，也有可能发现优化的效果不好浪费时间
+    // 获得与当前关键帧有共视关系的一些关键帧，大于15个点，排序为从小到大
+    // Step9中为空就是因为这个
+    // ! 或许这里可以加上作者原本要写的部分
     const int maxCovKF = 0;
     for(int i=0, iend=vpNeighsKFs.size(); i<iend; i++)
     {
         if(lpOptVisKFs.size() >= maxCovKF)
+            // 在这里一直break了
             break;
 
         KeyFrame* pKFi = vpNeighsKFs[i];
@@ -3245,20 +3314,24 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
     }
 
     // Fixed KFs which are not covisible optimizable
+    // Step 5. 将所有mp点对应的关键帧（除了前面加过的）放入到固定组里面，后面优化时不改变
     const int maxFixKF = 200;
 
     for(list<MapPoint*>::iterator lit=lLocalMapPoints.begin(), lend=lLocalMapPoints.end(); lit!=lend; lit++)
     {
+        // 获取地图点对应的所有观测
         map<KeyFrame*,tuple<int,int>> observations = (*lit)->GetObservations();
         for(map<KeyFrame*,tuple<int,int>>::iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
         {
             KeyFrame* pKFi = mit->first;
 
+            // 保证这些关键帧之前没有被添加到优化中
             if(pKFi->mnBALocalForKF!=pKF->mnId && pKFi->mnBAFixedForKF!=pKF->mnId)
             {
                 pKFi->mnBAFixedForKF=pKF->mnId;
                 if(!pKFi->isBad())
                 {
+                    // 放入FixedKeyFrame
                     lFixedKeyFrames.push_back(pKFi);
                     break;
                 }
@@ -3271,6 +3344,7 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
     bool bNonFixed = (lFixedKeyFrames.size() == 0);
 
     // Setup optimizer
+    // Step 6. 构造优化器，正式开始优化
     g2o::SparseOptimizer optimizer;
     g2o::BlockSolverX::LinearSolverType * linearSolver;
     linearSolver = new g2o::LinearSolverEigen<g2o::BlockSolverX::PoseMatrixType>();
@@ -3280,6 +3354,8 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
     if(bLarge)
     {
         g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
+        // 当 lambda 很小时，算法更接近高斯牛顿法，步长大，但对误差的收敛性较敏感。
+        // 当 lambda 很大时，算法更接近梯度下降法，步长小，但更稳定。  
         solver->setUserLambdaInit(1e-2); // to avoid iterating for finding optimal lambda
         optimizer.setAlgorithm(solver);
     }
@@ -3289,11 +3365,14 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
         solver->setUserLambdaInit(1e0);
         optimizer.setAlgorithm(solver);
     }
+    // Step 7. 创建轨迹对齐节点？
 
+    // 获取GNSS原点附近的KF
     KeyFrame* kfRelatedToGpsOrigin = pCurrentMap->GetKFRelatedToGlobalOrigin(); 
     int edgesMeasCount = 0;
     const unsigned long iniMPid = maxKFid*5;
 
+    // 获取GNSS局部坐标系和世界坐标系间的刚性坐标旋转
     Eigen::Matrix3f Rgw = pCurrentMap->GetGlobalVIOAlignment();
     VertexRotation *VAlignment = new VertexRotation(Rgw);
     // The first (maxKFid + 1) * 4 identifiers are reserved 
@@ -3306,6 +3385,7 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
     optimizer.addVertex(VAlignment);
 
     // Set Local temporal KeyFrame vertices
+    // Step 8. 建立关于关键帧的节点，其中包括，位姿，速度，以及两个偏置，
     N=vpOptimizableKFs.size();
     int kfWithGlobalMeas = 0;
     int origEdges = 0;
@@ -3317,37 +3397,49 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
         VertexPose * VP = new VertexPose(pKFi);
         VP->setId(pKFi->mnId);
         VP->setFixed(false);
+        // 位姿
         optimizer.addVertex(VP);
         if(pKFi->bImu)
         {
+            // 速度
             VertexVelocity* VV = new VertexVelocity(pKFi);
             VV->setId(maxKFid+3*(pKFi->mnId)+1);
             VV->setFixed(false);
             optimizer.addVertex(VV);
+            // 陀螺仪偏置
             VertexGyroBias* VG = new VertexGyroBias(pKFi);
             VG->setId(maxKFid+3*(pKFi->mnId)+2);
             VG->setFixed(false);
             optimizer.addVertex(VG);
+            // 加速度偏置
             VertexAccBias* VA = new VertexAccBias(pKFi);
             VA->setId(maxKFid+3*(pKFi->mnId)+3);
             VA->setFixed(false);
             optimizer.addVertex(VA);
         }
 
+        // 添加GNSS节点以及边
         if(kfRelatedToGpsOrigin && kfRelatedToGpsOrigin->HasGlobalPositionMeas() && kfRelatedToGpsOrigin->mGlobalMeasCalib.mbIsSet && pKFi->HasGlobalPositionMeas())
         {                      
             kfWithGlobalMeas++;
             for(const GlobalPosition::GlobalPosition* meas : pKFi->GetGlobalPositionMeas())
-            {               
+            {    
+                // 获取原始测量结果
                 const GlobalPosition::GlobalPosition* originMeas = kfRelatedToGpsOrigin->GetGlobalPositionMeas()[0];
+                // 获取IMU/body坐标系在世界坐标系下的变换
                 Sophus::SE3f Twb0 = kfRelatedToGpsOrigin->GetPoseInverse() * kfRelatedToGpsOrigin->GetPoseRelativeToKF(originMeas->id).inverse() * kfRelatedToGpsOrigin->mImuCalib.mTcb;
+                // 天线杆臂
                 Eigen::Vector3f tbg = kfRelatedToGpsOrigin->mGlobalMeasCalib.tbg;
-                
-                Sophus::SE3f Tcir = pKFi->GetPoseRelativeToKF(meas->id);                
+                // 获取GNSS测量点的相对KF的位姿
+                Sophus::SE3f Tcir = pKFi->GetPoseRelativeToKF(meas->id); 
+                // 创建优化边，关联位姿节点和对齐节点               
                 EdgeGlobalMeasurement* edge = new EdgeGlobalMeasurement(Twb0.cast<double>(), Tcir.cast<double>(), tbg.cast<double>());
                 edge->setVertex(0, VP);
                 edge->setVertex(1, VAlignment);
 
+                // ? 这部分有点没看懂
+                // A: 计算当前测量到GNSS原点的欧式距离，距离足够大时才被加入优化
+                // Measurement是在GNSS原点坐标系下的
                 Eigen::Vector3d relativeMeasurement = meas->getRelativeFromOrigin(*originMeas);
                 double measurementNorm = relativeMeasurement.norm();
                 if(measurementNorm > 1e-3)
@@ -3366,6 +3458,8 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
     /*std::cout << "Global Meas. Optimization: " 
             << edgesMeasCount << " edges of type EdgeGlobalMeasurement. opt_it: " << opt_it << std::endl;*/
     // Set Local visual KeyFrame vertices
+    // Step 9 建立关于共视关键帧的节点，但这里为空
+    // Step4中获取的共视帧容器为空
     for(list<KeyFrame*>::iterator it=lpOptVisKFs.begin(), itEnd = lpOptVisKFs.end(); it!=itEnd; it++)
     {
         KeyFrame* pKFi = *it;
@@ -3392,6 +3486,7 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
     }
 
     // Set Fixed KeyFrame vertices
+    // Step 10. 建立关于固定关键帧的节点，其中包括，位姿，速度，以及两个偏置
     for(list<KeyFrame*>::iterator lit=lFixedKeyFrames.begin(), lend=lFixedKeyFrames.end(); lit!=lend; lit++)
     {
         KeyFrame* pKFi = *lit;
@@ -3421,7 +3516,8 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
     vector<EdgeInertial*> vei(N,(EdgeInertial*)NULL);
     vector<EdgeGyroRW*> vegr(N,(EdgeGyroRW*)NULL);
     vector<EdgeAccRW*> vear(N,(EdgeAccRW*)NULL);
-
+    // Step 11. 建立惯性边，没有imu跳过
+    // N: Local_Window中待优化关键帧数
     for(int i=0;i<N;i++)
     {
         KeyFrame* pKFi = vpOptimizableKFs[i];
@@ -3458,15 +3554,19 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
             vei[i]->setVertex(4,dynamic_cast<g2o::OptimizableGraph::Vertex*>(VP2));
             vei[i]->setVertex(5,dynamic_cast<g2o::OptimizableGraph::Vertex*>(VV2));
 
+            // 到最早的一个可优化的关键帧或者地图没有ba2时添加鲁棒核函数
             if(i==N-1 || bRecInit)
             {
                 // All inertial residuals are included without robust cost function, but not that one linking the
                 // last optimizable keyframe inside of the local window and the first fixed keyframe out. The
                 // information matrix for this measurement is also downweighted. This is done to avoid accumulating
                 // error due to fixing variables.
+                // 所有惯性残差都没有鲁棒核，但不包括窗口内最早一个可优化关键帧与第一个固定关键帧链接起来的惯性残差。
+                // 该度量的信息矩阵也被降权。这样做是为了避免由于固定变量而累积错误。
                 g2o::RobustKernelHuber* rki = new g2o::RobustKernelHuber;
                 vei[i]->setRobustKernel(rki);
                 if(i==N-1)
+                    // 信息矩阵降权
                     vei[i]->setInformation(vei[i]->information()*1e-2);
                 rki->setDelta(sqrt(16.92));
             }
@@ -3475,6 +3575,7 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
             vegr[i] = new EdgeGyroRW();
             vegr[i]->setVertex(0,VG1);
             vegr[i]->setVertex(1,VG2);
+            // ? 信息矩阵是什么，有什么用，怎么算的
             Eigen::Matrix3d InfoG = pKFi->mpImuPreintegrated->C.block<3,3>(9,9).cast<double>().inverse();
             vegr[i]->setInformation(InfoG);
             optimizer.addEdge(vegr[i]);
@@ -3515,7 +3616,8 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
     vpMapPointEdgeStereo.reserve(nExpectedSize);
 
 
-
+    // Step 12. 建立视觉边
+    // 核函数会用到卡方分布
     const float thHuberMono = sqrt(5.991);
     const float chi2Mono2 = 5.991;
     const float thHuberStereo = sqrt(7.815);
@@ -3541,18 +3643,20 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
 
         unsigned long id = pMP->mnId+iniMPid+1;
         vPoint->setId(id);
+        // 标记某个变量为边缘化后，优化过程会将该变量从问题中移除，但它的统计信息（例如协方差）会被保留并影响剩余变量的优化。
         vPoint->setMarginalized(true);
         optimizer.addVertex(vPoint);
         const map<KeyFrame*,tuple<int,int>> observations = pMP->GetObservations();
 
         // Create visual constraints
+        // 获取观测到当前地图点的关键帧
         for(map<KeyFrame*,tuple<int,int>>::const_iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
         {
             KeyFrame* pKFi = mit->first;
-
+            // 保证关键帧在优化过程中
             if(pKFi->mnBALocalForKF!=pKF->mnId && pKFi->mnBAFixedForKF!=pKF->mnId)
                 continue;
-
+            // 保证关键帧在当前地图中
             if(!pKFi->isBad() && pKFi->GetMap() == pCurrentMap)
             {
                 const int leftIndex = get<0>(mit->second);
@@ -3664,7 +3768,7 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
     {
         assert(mit->second>=3);
     }
-
+    // Step 13. 开始优化
     optimizer.initializeOptimization();
     optimizer.computeActiveErrors();
     float err = optimizer.activeRobustChi2();
@@ -3675,7 +3779,7 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
 
     vector<pair<KeyFrame*,MapPoint*> > vToErase;
     vToErase.reserve(vpEdgesMono.size()+vpEdgesStereo.size());
-
+    // Step 14. 开始确认待删除的连接关系
     // Check inlier observations
     // Mono
     for(size_t i=0, iend=vpEdgesMono.size(); i<iend;i++)
@@ -3737,7 +3841,7 @@ void Optimizer::LocalInertialBAWithGlobalMeas(KeyFrame *pKF, bool *pbStopFlag, M
 
     for(list<KeyFrame*>::iterator lit=lFixedKeyFrames.begin(), lend=lFixedKeyFrames.end(); lit!=lend; lit++)
         (*lit)->mnBAFixedForKF = 0;
-
+    // Step 15 取出结果
     // Recover optimized data
     // Local temporal Keyframes
     N=vpOptimizableKFs.size();
@@ -5530,6 +5634,9 @@ int Optimizer::PoseInertialOptimizationLastKeyFrame(Frame *pFrame, bool bRecInit
                     e->setMeasurement(obs);
 
                     // Add here uncerteinty
+                    // 获取不确定度，这里调用uncertainty2返回固定值1.0
+                    // ?这里的1.0是作为缺省值的意思吗？是否可以根据对视觉信息的信任度动态修改这个值，比如标定的误差？
+                    // ! mark一下，这里感觉可以继续修改
                     const float unc2 = pFrame->mpCamera->uncertainty2(obs);
 
                     const float invSigma2 = pFrame->mvInvLevelSigma2[kpUn.octave]/unc2;

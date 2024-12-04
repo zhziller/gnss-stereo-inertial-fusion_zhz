@@ -77,9 +77,12 @@ void LocalMapping::Run()
     while(1)
     {
         // Tracking will see that Local Mapping is busy
+        // Step 1 告诉Tracking，LocalMapping正处于繁忙状态，请不要给我发送关键帧打扰我
+        // LocalMapping线程处理的关键帧都是Tracking线程发过来的
         SetAcceptKeyFrames(false);
 
         // Check if there are keyframes in the queue
+        // 等待处理的关键帧列表不为空 并且imu正常
         if(CheckNewKeyFrames() && !mbBadImu)
         {
 #ifdef REGISTER_TIMES
@@ -89,6 +92,8 @@ void LocalMapping::Run()
             std::chrono::steady_clock::time_point time_StartProcessKF = std::chrono::steady_clock::now();
 #endif
             // BoW conversion and insertion in Map
+            // Step 对关键帧进行处理，主要是视觉层面的
+            // Step 2 处理列表中的关键帧，包括计算BoW、更新观测、描述子、共视图，插入到地图等
             ProcessNewKeyFrame();
 #ifdef REGISTER_TIMES
             std::chrono::steady_clock::time_point time_EndProcessKF = std::chrono::steady_clock::now();
@@ -98,6 +103,8 @@ void LocalMapping::Run()
 #endif
 
             // Check recent MapPoints
+            // Step 3 根据地图点的观测情况剔除质量不好的地图点
+            // ! mark一下，这里可以继续剔除运行时天空的地图点
             MapPointCulling();
 #ifdef REGISTER_TIMES
             std::chrono::steady_clock::time_point time_EndMPCulling = std::chrono::steady_clock::now();
@@ -107,13 +114,19 @@ void LocalMapping::Run()
 #endif
 
             // Triangulate new MapPoints
+            // Step 4 当前关键帧与相邻关键帧通过三角化产生新的地图点，使得跟踪更稳
+            // ! 我怎么感觉这里的三角化不是什么好事
             CreateNewMapPoints();
 
             mbAbortBA = false;
-
+            // 已经处理完队列中的最后的一个关键帧
             if(!CheckNewKeyFrames())
             {
                 // Find more matches in neighbor keyframes and fuse point duplications
+                //  Step 5 检查并融合当前关键帧与相邻关键帧帧（两级相邻）中重复的地图点
+                // 应该是指把重复的地图点合并了
+                // 先完成相邻关键帧与当前关键帧的地图点的融合（在相邻关键帧中查找当前关键帧的地图点），
+                // 再完成当前关键帧与相邻关键帧的地图点的融合（在当前关键帧中查找当前相邻关键帧的地图点）
                 SearchInNeighbors();
             }
 
@@ -129,21 +142,28 @@ void LocalMapping::Run()
             int num_OptKF_BA = 0;
             int num_MPs_BA = 0;
             int num_edges_BA = 0;
-
+            
+            // 已经处理完队列中的最后的一个关键帧，并且闭环检测没有请求停止LocalMapping
+            // 这里的对关键帧队列的处理就是前面的视觉层面的处理
+            // Step 下面的if内进行局部BA
             if(!CheckNewKeyFrames() && !stopRequested())
-            {
+            {   // 当前地图中关键帧数目大于2个，应该是指初始化结束时
                 if(mpAtlas->KeyFramesInMap()>2)
                 {
-
+                    // Step 6.1 处于IMU模式并且当前关键帧所在的地图已经完成IMU初始化
                     if(mbInertial && mpCurrentKeyFrame->GetMap()->isImuInitialized())
-                    {
+                    {   
+                        // 计算上一关键帧到当前关键帧相机光心的距离 + 上上关键帧到上一关键帧相机光心的距离
                         float dist = (mpCurrentKeyFrame->mPrevKF->GetCameraCenter() - mpCurrentKeyFrame->GetCameraCenter()).norm() +
                                 (mpCurrentKeyFrame->mPrevKF->mPrevKF->GetCameraCenter() - mpCurrentKeyFrame->mPrevKF->GetCameraCenter()).norm();
-
+                        // 如果距离大于5厘米，记录当前KF和上一KF时间戳的差，累加到mTinit
                         if(dist>0.05)
                             mTinit += mpCurrentKeyFrame->mTimeStamp - mpCurrentKeyFrame->mPrevKF->mTimeStamp;
+                        // 当前关键帧所在的地图尚未完成IMU BA2（IMU第三阶段初始化）
+                        // ? 不清楚IMU BA2是什么
                         if(!mpCurrentKeyFrame->GetMap()->GetIniertialBA2())
                         {
+                            // 如果累计时间差小于10s 并且 距离小于2厘米，认为运动幅度太小，不足以初始化IMU，将mbBadImu设置为true
                             if((mTinit<10.f) && (dist<0.02))
                             {
                                 cout << "Not enough motion for initializing. Reseting..." << endl;
@@ -154,20 +174,32 @@ void LocalMapping::Run()
                             }
                         }
 
+                        // ! 主要的改动在这里
+                        // 条件---------1.1、跟踪成功的内点数目大于75-----1.2、并且是单目--或--2.1、跟踪成功的内点数目大于100-----2.2、并且不是单目
                         bool bLarge = ((mpTracker->GetMatchesInliers()>75)&&mbMonocular)||((mpTracker->GetMatchesInliers()>100)&&!mbMonocular);
+
+                        // Step 6.2 条件：接收第一帧GNSS数据 且 当前关键帧所在的地图完成IMU BA2
                         if(mpTracker->GetGlobalFrameAlignmentState() == Tracking::FIRST_GLOBAL_MEAS_SET && mpCurrentKeyFrame->GetMap()->GetIniertialBA2())
                         {
+                            // 获取GNSS坐标原点
                             const GlobalPosition::GlobalPosition *origin = mpCurrentKeyFrame->GetMap()->GetKFRelatedToGlobalOrigin()->GetGlobalPositionMeas()[0];
+                            // 计算普通帧对应的GNSS天线位姿
                             auto framePoses = GetGlobalSensorPoses(mpCurrentKeyFrame->GetMap(),mpCurrentKeyFrame->mGlobalMeasCalib.tbg, origin->timestamp);
+                            // 进行对齐
+                            // mpTracker->GetDataToAlign()是GNSS数据
+                            // 获取GNSS局部坐标系相对于世界坐标系的刚性变换
                             Eigen::Matrix4f Twg0 = AlignGlobalFrame(origin, 
                                     mpTracker->GetDataToAlign(),
                                     framePoses);
                             std::cout << "poses to align: " << mpTracker->GetDataToAlign().size() << std::endl;
+                            // Rg0w对应的论文中的Ra0w
                             Rg0w = Twg0.topLeftCorner(3,3).inverse();
                             mpCurrentKeyFrame->GetMap()->SetGlobalVIOAlignment(Rg0w);
                             Optimizer::LocalInertialBA(mpCurrentKeyFrame, &mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, bLarge, !mpCurrentKeyFrame->GetMap()->GetIniertialBA2());                            
                             mpTracker->SetGlobalFrameAlignmentState(Tracking::ALIGNING);
                         }
+                        // Step 6.3 条件：GNSS与orbslam算出的pose对齐过程中
+                        // ! 感觉这里的代码有点问题，关于对齐状态的转换
                         else if(mpTracker->GetGlobalFrameAlignmentState() == Tracking::ALIGNING)
                         {
                             //Optimizer::LocalInertialBAWithGlobalMeas(mpCurrentKeyFrame, &mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, false, bLarge, !mpCurrentKeyFrame->GetMap()->GetIniertialBA2());
@@ -178,15 +210,22 @@ void LocalMapping::Run()
                                 std::cout << "ALIGNED!" << std::endl;
                                 mpTracker->SetGlobalFrameAlignmentState(Tracking::ALIGNED);
                             }
+                            // ? 对齐点不够怎么办？
+                            // else{
+
+                            // }
                         }
+                        // Step 6.4 条件： GNSS与orbslam算出的pose对齐完成
                         else if(mpTracker->GetGlobalFrameAlignmentState() == Tracking::ALIGNED)
                             Optimizer::LocalInertialBAWithGlobalMeas(mpCurrentKeyFrame, &mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, true, true, !mpCurrentKeyFrame->GetMap()->GetIniertialBA2());
                         else
+                        // Step 6.5 条件：无GNSS下的Local BA
                             Optimizer::LocalInertialBA(mpCurrentKeyFrame, &mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA, bLarge, !mpCurrentKeyFrame->GetMap()->GetIniertialBA2());
                         b_doneLBA = true;
                         /*std::cout << "+++++++++ " <<  mpTracker->GetGlobalFrameAlignmentState() << std::endl;
                         std::cout << "+++++++++ " <<  mpTracker->GetDataToAlign().size() << std::endl;*/
                     }
+                    // Step 6.6 条件：无IMU下的Local BA
                     else
                     {
                         Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpCurrentKeyFrame->GetMap(),num_FixedKF_BA,num_OptKF_BA,num_MPs_BA,num_edges_BA);
@@ -216,6 +255,7 @@ void LocalMapping::Run()
 #endif
 
                 // Initialize IMU here
+                // Step 7 当前关键帧所在地图未完成IMU初始化（第一阶段）
                 if(!mpCurrentKeyFrame->GetMap()->isImuInitialized() && mbInertial)
                 {
                     if (mbMonocular)
@@ -226,6 +266,10 @@ void LocalMapping::Run()
 
 
                 // Check redundant local Keyframes
+                // Check redundant local Keyframes
+                // 跟踪中关键帧插入条件比较松，交给LocalMapping线程的关键帧会比较密，这里再删除冗余
+                // Step 8 检测并剔除当前帧相邻的关键帧中冗余的关键帧
+                // 冗余的判定：该关键帧的90%的地图点可以被其它关键帧观测到
                 KeyFrameCulling();
 
 #ifdef REGISTER_TIMES
@@ -234,7 +278,7 @@ void LocalMapping::Run()
                 timeKFCulling_ms = std::chrono::duration_cast<std::chrono::duration<double,std::milli> >(time_EndKFCulling - time_EndLBA).count();
                 vdKFCulling_ms.push_back(timeKFCulling_ms);
 #endif
-
+                // Step 9 如果距离IMU第一阶段初始化成功累计时间差小于100s，进行VIBA
                 if ((mTinit<50.0f) && mbInertial)
                 {
                     if(mpCurrentKeyFrame->GetMap()->isImuInitialized() && mpTracker->mState==Tracking::OK) // Enter here everytime local-mapping is called
@@ -284,7 +328,7 @@ void LocalMapping::Run()
             vdLBASync_ms.push_back(timeKFCulling_ms);
             vdKFCullingSync_ms.push_back(timeKFCulling_ms);
 #endif
-
+            // Step 10 将当前帧加入到闭环检测队列中
             mpLoopCloser->InsertKeyFrame(mpCurrentKeyFrame);
 
 #ifdef REGISTER_TIMES
@@ -308,6 +352,7 @@ void LocalMapping::Run()
         ResetIfRequested();
 
         // Tracking will see that Local Mapping is busy
+        // 开始接收关键帧
         SetAcceptKeyFrames(true);
 
         if(CheckFinish())
@@ -371,6 +416,9 @@ Eigen::Matrix4f ZhangYawAlignment(std::list<Eigen::Vector3d> trajSrc, std::list<
 
 }
 
+/**
+ * @brief 返回世界坐标系和GNSS局部直角坐标系之间的相对坐标变换
+ */
 Eigen::Matrix4f LocalMapping::AlignGlobalFrame(const GlobalPosition::GlobalPosition* origin, list<const GlobalPosition::GlobalPosition*> gpsData, list<pair<double,Eigen::Vector3f>> framePosesData)
 {    
     const double timeThreshold = 0.035;
@@ -384,9 +432,11 @@ Eigen::Matrix4f LocalMapping::AlignGlobalFrame(const GlobalPosition::GlobalPosit
     {
         iters++;
         pair<double,Eigen::Vector3f> p_i = *framePosesDataIt;
+        // 按时间对齐估计轨迹和GNSS测量
         if(std::abs((framePosesDataIt->first - (*gpsDataIt)->timestamp)) < timeThreshold)
         {
             trajEstimated.push_back((framePosesDataIt->second).cast<double>());
+            // GNSS转成东北天的相对坐标
             trajGlobalMeas.push_back((*gpsDataIt)->getRelativeFromOrigin(*origin));
             framePosesDataIt++;
             gpsDataIt++;
@@ -406,16 +456,27 @@ Eigen::Matrix4f LocalMapping::AlignGlobalFrame(const GlobalPosition::GlobalPosit
     std::cout << "size poses: " << trajEstimated.size() << std::endl;
     return UmeyamaAlignment(trajGlobalMeas, trajEstimated);//ZhangYawAlignment(trajGlobalMeas, trajEstimated);
 }
-
+/**
+ * @brief 返回GNSS天线的位姿，计算方法如下
+ * @brief 找出KF位姿，KF*普通帧的相对位姿得到camera或者说body的位姿，这个位姿*tbg得到GNSS天线的位姿
+ * @param pBiggerMap
+ * @param tbg：gnss相对body的平移矩阵
+ * @param originTs:gnss 原点时间戳
+ */
 list<pair<double,Eigen::Vector3f>> LocalMapping::GetGlobalSensorPoses(Map* pBiggerMap, Eigen::Vector3f tbg, double originTs)
 {
+    // KF list
     list<ORB_SLAM3::KeyFrame*>::iterator lRit = mpTracker->mlpReferences.begin();
+    // frame time list
     list<double>::iterator lT = mpTracker->mlFrameTimes.begin();
+    // 跟踪状态list，ture是lost
     list<bool>::iterator lbL = mpTracker->mlbLost.begin();
     list<pair<double,Eigen::Vector3f>> poses;
+    // mlRelativeFramePoses保存的就是所有frame的pose
     for(auto lit=mpTracker->mlRelativeFramePoses.begin(),
         lend=mpTracker->mlRelativeFramePoses.end();lit!=lend;lit++, lRit++, lT++, lbL++)
     {        
+        // 跟踪失败，跳过
         if(*lbL)
             continue;
 
@@ -429,10 +490,12 @@ list<pair<double,Eigen::Vector3f>> LocalMapping::GetGlobalSensorPoses(Map* pBigg
 
         while(pKF->isBad())
         {
+            //pKF转为父KF
             Trw = Trw * pKF->mTcp;
             pKF = pKF->GetParent();
         }
 
+        // 父KF的地图对应不上
         if(!pKF || pKF->GetMap() != pBiggerMap)
         {
             continue;
@@ -440,6 +503,7 @@ list<pair<double,Eigen::Vector3f>> LocalMapping::GetGlobalSensorPoses(Map* pBigg
 
         Trw = Trw * pKF->GetPose();
 
+        // 有IMU时对IMU进行补偿
         if (mpTracker->mSensor == System::IMU_MONOCULAR || mpTracker->mSensor == System::IMU_STEREO || mpTracker->mSensor==System::IMU_RGBD)
         {
             Sophus::SE3f Twb = (pKF->mImuCalib.mTbc * (*lit) * Trw).inverse();
@@ -450,6 +514,7 @@ list<pair<double,Eigen::Vector3f>> LocalMapping::GetGlobalSensorPoses(Map* pBigg
             if(*lT > originTs)
                 poses.push_back(make_pair(*lT, p));
         }
+        // 没有的时候不用补偿
         else
         {
             Sophus::SE3f Twc = ((*lit)*Trw).inverse();
@@ -571,15 +636,18 @@ void LocalMapping::CreateNewMapPoints()
 {
     // Retrieve neighbor keyframes in covisibility graph
     int nn = 10;
-    // For stereo inertial case
+    // For Monocular inertial case
     if(mbMonocular)
         nn=30;
+    // Step 1：在当前关键帧的共视关键帧中找到共视程度最高的nn帧相邻关键帧
     vector<KeyFrame*> vpNeighKFs = mpCurrentKeyFrame->GetBestCovisibilityKeyFrames(nn);
 
+    // imu模式下在附近添加更多的帧进来
     if (mbInertial)
     {
         KeyFrame* pKF = mpCurrentKeyFrame;
         int count=0;
+        // 在总数不够且上一关键帧存在，且添加的帧没有超过总数时
         while((vpNeighKFs.size()<=nn)&&(pKF->mPrevKF)&&(count++<nn))
         {
             vector<KeyFrame*>::iterator it = std::find(vpNeighKFs.begin(), vpNeighKFs.end(), pKF->mPrevKF);
