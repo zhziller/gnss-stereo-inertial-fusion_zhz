@@ -6,7 +6,7 @@
     <arg name="settings" default="/home/zou/project/GNSS_Orb_slam3/gnss-stereo-inertial-fusion_zhz/Examples/Stereo-Inertial/rosario_dataset/t265_param0.yaml" doc="System settings."/> 
     <arg name="map_frame_id" default="map"/>
     <arg name="base_link_frame_id" default="base_link"/>
-    <node name="orbslam3_gnss_stereo_inertial" pkg="GNSS_SI" type="Stereo_Inertial" output="screen" args="$(arg vocabulary) $(arg settings) false "\
+    <node name="orbslam3_gnss_stereo_inertial" pkg="GNSS_SI" type="Stereo_Inertial" output="screen" args="$(arg vocabulary) $(arg settings) false "
         launch-prefix="xterm -e gdb -ex run --args "> 
         <!-- <remap from="/camera/left/image_raw" to="/stereo/left/image_raw"/>
         <remap from="/camera/right/image_raw" to="/stereo/right/image_raw"/> -->
